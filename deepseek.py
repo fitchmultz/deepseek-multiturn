@@ -195,14 +195,14 @@ class DeepSeekChat:
                 and self.auto_iterations < self.max_auto_iterations
                 and response_text is not None
             ):
-                self.auto_iterations += 1  # Increment before processing
-                print(
-                    f"{Colors.CYAN}🔄 Auto-iteration: {self.auto_iterations}/{self.max_auto_iterations}{Colors.ENDC}"
-                )
-
                 auto_response = self._generate_auto_response()
                 if not auto_response:
                     break
+
+                self.auto_iterations += 1  # Increment after successful auto-response
+                print(
+                    f"{Colors.CYAN}🔄 Auto-iteration: {self.auto_iterations}/{self.max_auto_iterations}{Colors.ENDC}"
+                )
 
                 print(f"\n{Colors.GREEN}👤 Auto-user: {auto_response}{Colors.ENDC}")
                 self.messages.append(
