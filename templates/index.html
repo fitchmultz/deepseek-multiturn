@@ -75,88 +75,99 @@
         }
 
         async function sendMessage() {
-    const message = userInput.value.trim();
-    if (!message) return;
+            const message = userInput.value.trim();
+            if (!message) return;
 
-    // Add user message
-    addMessage(message, true);
-    userInput.value = '';
+            // Add user message
+            addMessage(message, true);
+            userInput.value = '';
 
-    // Create EventSource for streaming response
-    const response = await fetch('/chat', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ message }),
-    });
+            const response = await fetch('/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ message }),
+            });
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let assistantResponse = '';
-    let reasoningResponse = '';
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let assistantResponse = '';
+            let reasoningResponse = '';
+            let currentAssistantDiv = null;
+            let currentReasoningDiv = null;
 
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
 
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n');
+                const chunk = decoder.decode(value);
+                const lines = chunk.split('\n');
 
-        for (const line of lines) {
-            if (line.startsWith('data: ')) {
-                const data = JSON.parse(line.slice(6));
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const data = JSON.parse(line.slice(6));
 
-                switch (data.type) {
-                    case 'content':
-                        assistantResponse += data.chunk;
-                        // Update the assistant's message in real-time
-                        const assistantDiv = document.querySelector('.assistant-response');
-                        if (assistantDiv) {
-                            assistantDiv.innerHTML = marked.parse(assistantResponse);
-                        } else {
-                            const newDiv = document.createElement('div');
-                            newDiv.className = 'assistant-response mb-4 p-4 rounded bg-gray-100 max-w-[80%]';
-                            newDiv.innerHTML = marked.parse(assistantResponse);
-                            chatContainer.appendChild(newDiv);
+                        switch (data.type) {
+                            case 'content':
+                                assistantResponse += data.chunk;
+                                if (!currentAssistantDiv) {
+                                    currentAssistantDiv = document.createElement('div');
+                                    currentAssistantDiv.className = 'mb-4 p-4 rounded bg-gray-100 max-w-[80%]';
+                                    chatContainer.appendChild(currentAssistantDiv);
+                                }
+                                currentAssistantDiv.innerHTML = marked.parse(assistantResponse);
+                                break;
+
+                            case 'reasoning':
+                                reasoningResponse += data.chunk;
+                                if (!currentReasoningDiv) {
+                                    currentReasoningDiv = document.createElement('div');
+                                    currentReasoningDiv.className = 'mb-4 p-4 rounded bg-yellow-100 max-w-[80%]';
+                                    chatContainer.appendChild(currentReasoningDiv);
+                                }
+                                currentReasoningDiv.innerHTML = marked.parse(reasoningResponse);
+                                break;
+
+                            case 'auto_user':
+                                // Finalize current assistant response
+                                if (currentAssistantDiv) {
+                                    currentAssistantDiv.innerHTML = marked.parse(assistantResponse);
+                                    currentAssistantDiv = null;
+                                }
+                                if (currentReasoningDiv) {
+                                    currentReasoningDiv.innerHTML = marked.parse(reasoningResponse);
+                                    currentReasoningDiv = null;
+                                }
+
+                                // Reset for next round
+                                assistantResponse = '';
+                                reasoningResponse = '';
+
+                                // Add auto-user message
+                                const autoUserDiv = document.createElement('div');
+                                autoUserDiv.className = 'mb-4 p-4 rounded bg-purple-100 ml-auto max-w-[80%]';
+                                autoUserDiv.innerHTML = `
+                                    <div class="text-xs text-purple-600 mb-1">Auto User</div>
+                                    ${marked.parse(data.content)}
+                                `;
+                                chatContainer.appendChild(autoUserDiv);
+                                break;
+
+                            case 'error':
+                                console.error('Error:', data.message);
+                                const errorDiv = document.createElement('div');
+                                errorDiv.className = 'mb-4 p-4 rounded bg-red-100 max-w-[80%]';
+                                errorDiv.innerHTML = `Error: ${data.message}`;
+                                chatContainer.appendChild(errorDiv);
+                                break;
                         }
-                        break;
 
-                    case 'reasoning':
-                        reasoningResponse += data.chunk;
-                        // Update the reasoning message
-                        const reasoningDiv = document.querySelector('.reasoning-response');
-                        if (reasoningDiv) {
-                            reasoningDiv.innerHTML = marked.parse(reasoningResponse);
-                        } else {
-                            const newDiv = document.createElement('div');
-                            newDiv.className = 'reasoning-response mb-4 p-4 rounded bg-yellow-100 max-w-[80%]';
-                            newDiv.innerHTML = marked.parse(reasoningResponse);
-                            chatContainer.appendChild(newDiv);
-                        }
-                        break;
-
-                    case 'auto_user':
-                        // Reset assistant and reasoning responses for next round
-                        assistantResponse = '';
-                        reasoningResponse = '';
-                        // Remove existing response divs
-                        document.querySelector('.assistant-response')?.remove();
-                        document.querySelector('.reasoning-response')?.remove();
-                        // Add auto-user message
-                        addAutoUserMessage(data.content);
-                        break;
-
-                    case 'error':
-                        console.error('Error:', data.message);
-                        addMessage(`Error: ${data.message}`, false);
-                        break;
+                        // Scroll to bottom after each update
+                        chatContainer.scrollTop = chatContainer.scrollHeight;
+                    }
                 }
             }
-            }
-        }
-
-            chatContainer.scrollTop = chatContainer.scrollHeight;
         }
 
         sendButton.addEventListener("click", sendMessage);
