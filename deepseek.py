@@ -1,6 +1,9 @@
 import json
 import os
+import pickle
 import re
+from datetime import datetime
+from pathlib import Path
 from typing import Dict, Generator, List, Optional
 
 import requests
@@ -38,8 +41,11 @@ class DeepSeekChat:
         self.auto_mode = True
         self.auto_iterations = 0
         self.max_auto_iterations = 3
-        self.max_auto_retries = 2  # New: Maximum retries for auto-mode errors
+        self.max_auto_retries = 2
         self.show_reasoning = False
+        self.save_dir = Path("chat_history")
+        self.save_dir.mkdir(exist_ok=True)
+
         self._auto_instruction = (
             "Generate the next USER message based on the conversation history. "
             "Keep it natural and match the user's message style. Be as LENGTHY as "
@@ -47,6 +53,64 @@ class DeepSeekChat:
             "the user's message text WITHOUT any additional commentary. You can "
             "add markdown formatting if you want, but it's not required."
         )
+
+    def save_conversation(self, filename=None) -> None:
+        """Save current conversation state to disk"""
+        if not filename:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"chat_session_{timestamp}.pkl"
+
+        save_path = self.save_dir / filename
+
+        # Create state dictionary
+        state = {
+            "messages": self.messages,
+            "auto_mode": self.auto_mode,
+            "auto_iterations": self.auto_iterations,
+            "show_reasoning": self.show_reasoning,
+        }
+
+        with open(save_path, "wb") as f:
+            pickle.dump(state, f)
+
+        console.print(
+            Panel(f"💾 Conversation saved to {save_path}", border_style="green")
+        )
+
+    def load_conversation(self, filename: str) -> None:
+        """Load conversation state from disk"""
+        load_path = self.save_dir / filename
+
+        if not load_path.exists():
+            console.print(Panel(f"❌ File not found: {load_path}", border_style="red"))
+            return
+
+        try:
+            with open(load_path, "rb") as f:
+                state = pickle.load(f)
+
+            self.messages = state["messages"]
+            self.auto_mode = state["auto_mode"]
+            self.auto_iterations = state["auto_iterations"]
+            self.show_reasoning = state["show_reasoning"]
+
+            console.print(
+                Panel("📂 Conversation loaded successfully", border_style="green")
+            )
+
+            # Display last few messages for context
+            last_msgs = self.messages[-3:] if len(self.messages) > 3 else self.messages
+            console.print(Panel("Last few messages:", border_style="cyan"))
+            for msg in last_msgs:
+                style = self.PANEL_STYLES[
+                    "user" if msg["role"] == "user" else "assistant"
+                ]
+                console.print(Panel(Markdown(msg["content"]), **style))
+
+        except Exception as e:
+            console.print(
+                Panel(f"❌ Error loading conversation: {str(e)}", border_style="red")
+            )
 
     def _validate_message_sequence(self, new_role: str) -> None:
         """Ensure proper alternation between user and assistant roles."""
@@ -102,8 +166,7 @@ class DeepSeekChat:
                 if not raw_line.startswith("data:"):
                     continue
 
-                # Extract content and handle server keep-alives
-                data_content = raw_line[5:].strip()  # Remove 'data:' prefix
+                data_content = raw_line[5:].strip()
                 if data_content == "[DONE]":
                     break
 
@@ -111,13 +174,12 @@ class DeepSeekChat:
                     continue
 
                 try:
-                    # Handle potential partial JSON
                     buffer += data_content
                     if not (buffer.startswith("{") and buffer.endswith("}")):
-                        continue  # Wait for complete JSON object
+                        continue
 
                     chunk = json.loads(buffer)
-                    buffer = ""  # Reset buffer after successful parse
+                    buffer = ""
 
                     if not chunk.get("choices"):
                         continue
@@ -133,7 +195,7 @@ class DeepSeekChat:
                     console.print(
                         f"[red]JSON parse error: {str(e)} in data: {data_content}[/red]"
                     )
-                    buffer = ""  # Reset buffer on error
+                    buffer = ""
                     continue
 
         except requests.exceptions.RequestException as e:
@@ -191,20 +253,17 @@ class DeepSeekChat:
                             )
                     elif type_ == "content":
                         if not has_shown_content:
-                            # Remove explicit header prints
                             has_shown_content = True
 
                         content_buffer.append(chunk)
                         full_response.append(chunk)
 
-                        # Update with combined panel
                         panel = Panel(
                             Markdown("".join(content_buffer)),
                             **{**self.PANEL_STYLES["user"], "title": "👤 Auto-User"},
                         )
                         live.update(panel)
 
-                # Final update with complete panel
                 if has_shown_content:
                     live.update(
                         Panel(
@@ -226,24 +285,19 @@ class DeepSeekChat:
     def chat(self, user_input: str) -> None:
         """Main chat method with iterative auto-response handling"""
         try:
-            # Add user message with validation
             self._validate_message_sequence("user")
             self.messages.append(
                 {"role": "user", "content": user_input, "is_auto_generated": False}
             )
 
-            # Display user input as markdown
             console.print(Panel(Markdown(user_input), **self.PANEL_STYLES["user"]))
 
-            # Reset auto-iteration counter for new user input
             self.auto_iterations = 0
 
-            # Generate initial response
             response_text = self._process_chat_round()
             if not response_text:
                 return
 
-            # Handle auto-responses iteratively with loop control and error handling
             retry_count = 0
             while (
                 self.auto_mode
@@ -276,7 +330,6 @@ class DeepSeekChat:
                         }
                     )
 
-                    # Process assistant response
                     response_text = self._process_chat_round()
                     if not response_text:
                         console.print(
@@ -287,7 +340,6 @@ class DeepSeekChat:
                         )
                         break
 
-                    # Reset retry count on successful iteration
                     retry_count = 0
 
                 except Exception as e:
@@ -329,10 +381,23 @@ class DeepSeekChat:
 
             full_response = []
             content_buffer = []
-            has_content = False
+
+            # Create a static panel that we'll update
+            panel = None
+
+            # Calculate available height for the live display
+            term_height = console.height
+            max_display_height = (
+                term_height - 4
+            )  # Reserve space for borders and padding
 
             with Live(
-                console=console, refresh_per_second=4, vertical_overflow="visible"
+                Panel("", title="🤖 Assistant", border_style="blue", style="blue"),
+                console=console,
+                refresh_per_second=4,
+                vertical_overflow="crop",  # Change to crop
+                auto_refresh=False,  # Disable auto-refresh
+                transient=True,  # Use transient mode
             ) as live:
                 for type_, chunk in self._stream_request(payload):
                     if type_ == "reasoning":
@@ -342,25 +407,31 @@ class DeepSeekChat:
                         content_buffer.append(chunk)
                         full_response.append(chunk)
 
-                        # Create panel with current content
-                        panel = Panel(
-                            Markdown("".join(content_buffer)),
-                            title="🤖 Assistant",
-                            border_style="blue",
-                            style="blue",
-                        )
-                        live.update(panel)
+                        # Create complete content string
+                        current_content = "".join(content_buffer)
 
-                # Final update with complete panel
-                if content_buffer:
-                    live.update(
-                        Panel(
-                            Markdown("".join(content_buffer)),
-                            title="🤖 Assistant",
-                            border_style="blue",
-                            style="blue",
-                        )
+                        # Only create new panel if content actually changed
+                        if panel is None or panel.renderable.markup != current_content:
+                            panel = Panel(
+                                Markdown(current_content),
+                                title="🤖 Assistant",
+                                border_style="blue",
+                                style="blue",
+                                height=max_display_height,
+                            )
+                            live.update(panel)
+                            live.refresh()  # Explicit refresh
+
+                # Final render - print the complete response without Live
+                final_content = "".join(content_buffer)
+                console.print(
+                    Panel(
+                        Markdown(final_content),
+                        title="🤖 Assistant",
+                        border_style="blue",
+                        style="blue",
                     )
+                )
 
             response_text = "".join(full_response)
             if response_text:
@@ -386,7 +457,8 @@ if __name__ == "__main__":
     title.append(" - Type 'exit' to quit\n", style="dim")
     title.append("Commands: ", style="bold")
     title.append(
-        "'auto' to toggle auto-mode, 'reason' to toggle reasoning, 'exit' to quit",
+        "'auto' to toggle auto-mode, 'reason' to toggle reasoning, "
+        "'save' to save conversation, 'load <filename>' to load conversation, 'exit' to quit",
         style="italic",
     )
     console.print(Panel(title, border_style="blue"))
@@ -404,6 +476,13 @@ if __name__ == "__main__":
                 continue
             elif user_input.lower().strip() in ("reason", "reasoning"):
                 chat_session.toggle_reasoning()
+                continue
+            elif user_input.lower().strip() == "save":
+                chat_session.save_conversation()
+                continue
+            elif user_input.lower().startswith("load "):
+                filename = user_input[5:].strip()
+                chat_session.load_conversation(filename)
                 continue
 
             chat_session.chat(user_input)
