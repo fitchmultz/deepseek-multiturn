@@ -5,6 +5,7 @@ from typing import Dict, Generator, List, Optional
 
 import requests
 from rich.console import Console
+from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.text import Text
@@ -285,7 +286,7 @@ class DeepSeekChat:
             console.print(Panel(f"❌ Error: {str(e)}", border_style="red"))
 
     def _process_chat_round(self) -> Optional[str]:
-        """Handle a single round of chat interaction with markdown rendering"""
+        """Handle chat interaction with streaming markdown rendering"""
         try:
             self._validate_message_sequence("assistant")
             payload = {
@@ -300,22 +301,34 @@ class DeepSeekChat:
 
             full_response = []
             full_reasoning = []
-            content_received = False  # Track if we received any content
+            content_buffer = []
+            has_content = False
 
-            for type_, chunk in self._stream_request(payload):
-                if type_ == "reasoning":
-                    if self.show_reasoning:
-                        console.print(chunk, style="yellow", end="")
-                    full_reasoning.append(chunk)
-                elif type_ == "content":
-                    full_response.append(chunk)
-                    content_received = True
+            # Initialize Live once at the start
+            with Live(
+                console=console, refresh_per_second=4, vertical_overflow="visible"
+            ) as live:
+                for type_, chunk in self._stream_request(payload):
+                    if type_ == "reasoning":
+                        if self.show_reasoning:
+                            console.print(chunk, style="yellow", end="")
+                        full_reasoning.append(chunk)
+                    elif type_ == "content":
+                        if not has_content:
+                            # Only print headers once
+                            console.print("\n" + "─" * 80 + "\n")
+                            console.print(Panel("🤖 Response:", border_style="blue"))
+                            has_content = True
 
-            # Render markdown after collecting all content
-            if content_received:
-                console.print("\n" + "─" * 80 + "\n")
-                console.print(Panel("🤖 Response:", border_style="blue"))
-                console.print(Markdown("".join(full_response)))
+                        content_buffer.append(chunk)
+                        full_response.append(chunk)
+
+                        # Update live display with current markdown
+                        live.update(Markdown("".join(content_buffer)))
+
+                # Final update to ensure complete rendering
+                if has_content:
+                    live.update(Markdown("".join(content_buffer)))
 
             response_text = "".join(full_response)
             if response_text:
