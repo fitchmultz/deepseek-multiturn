@@ -4,6 +4,12 @@ import re
 from typing import Dict, Generator, List, Optional
 
 import requests
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.panel import Panel
+from rich.text import Text
+
+console = Console()
 
 
 # ANSI color codes
@@ -53,6 +59,30 @@ class DeepSeekChat:
             msg for msg in self.messages if not msg.get("is_auto_generated")
         ]
 
+    def toggle_auto_mode(self) -> None:
+        """Safely toggle auto-mode with state cleanup"""
+        self.auto_mode = not self.auto_mode
+        self.auto_iterations = 0
+        if self.auto_mode:
+            self._clean_auto_messages()
+
+        status = Text()
+        status.append("🔄 Auto-mode ", style="cyan")
+        status.append("enabled" if self.auto_mode else "disabled", style="bold cyan")
+        status.append(" + ", style="cyan")
+        status.append(f"Max auto-iterations: {self.max_auto_iterations}", style="bold")
+        console.print(Panel(status, border_style="cyan"))
+
+    def toggle_reasoning(self) -> None:
+        """Toggle visibility of assistant reasoning output"""
+        self.show_reasoning = not self.show_reasoning
+        status = Text()
+        status.append("🔄 Assistant reasoning display ", style="cyan")
+        status.append(
+            "enabled" if self.show_reasoning else "disabled", style="bold cyan"
+        )
+        console.print(Panel(status, border_style="cyan"))
+
     def _stream_request(self, payload: Dict) -> Generator[tuple[str, str], None, None]:
         """Improved SSE parsing with complete JSON validation"""
         try:
@@ -98,29 +128,14 @@ class DeepSeekChat:
                             yield ("content", delta["content"])
 
                 except json.JSONDecodeError as e:
-                    print(f"JSON parse error: {str(e)} in data: {data_content}")
+                    console.print(
+                        f"[red]JSON parse error: {str(e)} in data: {data_content}[/red]"
+                    )
                     buffer = ""  # Reset buffer on error
                     continue
 
         except requests.exceptions.RequestException as e:
             raise RuntimeError(f"API Error: {str(e)}")
-
-    def toggle_auto_mode(self) -> None:
-        """Safely toggle auto-mode with state cleanup"""
-        self.auto_mode = not self.auto_mode
-        self.auto_iterations = 0
-        if self.auto_mode:
-            self._clean_auto_messages()
-        print(
-            f"\n{Colors.CYAN}🔄 Auto-mode {'enabled' if self.auto_mode else 'disabled'}{Colors.ENDC} + {Colors.BOLD}Max auto-iterations: {self.max_auto_iterations}{Colors.ENDC}\n"
-        )
-
-    def toggle_reasoning(self) -> None:
-        """Toggle visibility of assistant reasoning output"""
-        self.show_reasoning = not self.show_reasoning
-        print(
-            f"\n{Colors.CYAN}🔄 Assistant reasoning display {'enabled' if self.show_reasoning else 'disabled'}{Colors.ENDC}\n"
-        )
 
     def _generate_auto_response(self) -> Optional[str]:
         """Generate auto-response with optional output suppression"""
@@ -147,11 +162,13 @@ class DeepSeekChat:
             }
 
             if self.show_reasoning:
-                print(
-                    f"\n{Colors.CYAN}💭 Generating auto-response with full context:{Colors.ENDC}",
-                    flush=True,
+                console.print(
+                    Panel(
+                        "💭 Generating auto-response with full context",
+                        border_style="cyan",
+                    )
                 )
-                print("─" * 80)
+                console.print("─" * 80)
 
             full_response = []
             has_shown_content_header = False
@@ -159,20 +176,20 @@ class DeepSeekChat:
             for type_, chunk in self._stream_request(payload):
                 if type_ == "reasoning":
                     if self.show_reasoning:
-                        print(
-                            f"{Colors.YELLOW}{chunk}{Colors.ENDC}", end="", flush=True
-                        )
+                        console.print(chunk, style="yellow", end="")
                 elif type_ == "content":
                     full_response.append(chunk)
                     if not has_shown_content_header:
-                        print("\n" + "─" * 80)
+                        console.print("\n" + "─" * 80)
                         has_shown_content_header = True
 
             return "".join(full_response).strip()
 
         except Exception as e:
-            print(
-                f"\n{Colors.RED}❌ Error generating auto-response: {str(e)}{Colors.ENDC}"
+            console.print(
+                Panel(
+                    f"❌ Error generating auto-response: {str(e)}", border_style="red"
+                )
             )
             return None
 
@@ -203,17 +220,25 @@ class DeepSeekChat:
                 try:
                     auto_response = self._generate_auto_response()
                     if not auto_response:
-                        print(
-                            f"\n{Colors.YELLOW}⚠️ Auto-response generation failed, stopping auto-mode{Colors.ENDC}"
+                        console.print(
+                            Panel(
+                                "⚠️ Auto-response generation failed, stopping auto-mode",
+                                border_style="yellow",
+                            )
                         )
                         break
 
                     self.auto_iterations += 1
-                    print(
-                        f"{Colors.CYAN}🔄 Auto-iteration: {self.auto_iterations}/{self.max_auto_iterations}{Colors.ENDC}"
+                    console.print(
+                        Panel(
+                            f"🔄 Auto-iteration: {self.auto_iterations}/{self.max_auto_iterations}",
+                            border_style="cyan",
+                        )
                     )
 
-                    print(f"\n{Colors.GREEN}👤 Auto-user: {auto_response}{Colors.ENDC}")
+                    console.print(
+                        Panel(Text(f"👤 Auto-user: {auto_response}", style="green"))
+                    )
                     self.messages.append(
                         {
                             "role": "user",
@@ -225,8 +250,11 @@ class DeepSeekChat:
                     # Process assistant response
                     response_text = self._process_chat_round()
                     if not response_text:
-                        print(
-                            f"\n{Colors.YELLOW}⚠️ Assistant response failed, stopping auto-mode{Colors.ENDC}"
+                        console.print(
+                            Panel(
+                                "⚠️ Assistant response failed, stopping auto-mode",
+                                border_style="yellow",
+                            )
                         )
                         break
 
@@ -236,19 +264,25 @@ class DeepSeekChat:
                 except Exception as e:
                     retry_count += 1
                     if retry_count > self.max_auto_retries:
-                        print(
-                            f"\n{Colors.RED}❌ Max retries ({self.max_auto_retries}) exceeded in auto-mode, stopping{Colors.ENDC}"
+                        console.print(
+                            Panel(
+                                f"❌ Max retries ({self.max_auto_retries}) exceeded in auto-mode, stopping",
+                                border_style="red",
+                            )
                         )
                         break
-                    print(
-                        f"\n{Colors.YELLOW}⚠️ Auto-mode error (attempt {retry_count}/{self.max_auto_retries}): {str(e)}{Colors.ENDC}"
+                    console.print(
+                        Panel(
+                            f"⚠️ Auto-mode error (attempt {retry_count}/{self.max_auto_retries}): {str(e)}",
+                            border_style="yellow",
+                        )
                     )
                     continue
 
         except Exception as e:
             if self.messages and self.messages[-1]["role"] == "user":
                 self.messages.pop()
-            print(f"\n{Colors.RED}❌ Error: {str(e)}{Colors.ENDC}")
+            console.print(Panel(f"❌ Error: {str(e)}", border_style="red"))
 
     def _process_chat_round(self) -> Optional[str]:
         """Handle a single round of chat interaction"""
@@ -261,8 +295,8 @@ class DeepSeekChat:
             }
 
             if self.show_reasoning:
-                print(f"\n{Colors.YELLOW}💭 Reasoning:{Colors.ENDC}", flush=True)
-                print("─" * 80)
+                console.print(Panel("💭 Reasoning:", border_style="yellow"))
+                console.print("─" * 80)
 
             full_response = []
             full_reasoning = []
@@ -271,16 +305,14 @@ class DeepSeekChat:
             for type_, chunk in self._stream_request(payload):
                 if type_ == "reasoning":
                     if self.show_reasoning:
-                        print(
-                            f"{Colors.YELLOW}{chunk}{Colors.ENDC}", end="", flush=True
-                        )
+                        console.print(chunk, style="yellow", end="")
                     full_reasoning.append(chunk)
                 elif type_ == "content":
                     if not has_shown_content_header:
-                        print("\n" + "─" * 80 + "\n")
-                        print(f"{Colors.BLUE}🤖 Response:{Colors.ENDC}", flush=True)
+                        console.print("\n" + "─" * 80 + "\n")
+                        console.print(Panel("🤖 Response:", border_style="blue"))
                         has_shown_content_header = True
-                    print(f"{Colors.BLUE}{chunk}{Colors.ENDC}", end="", flush=True)
+                    console.print(chunk, style="blue", end="")
                     full_response.append(chunk)
 
             response_text = "".join(full_response)
@@ -292,24 +324,29 @@ class DeepSeekChat:
                         "is_auto_generated": False,
                     }
                 )
-            print("\n")
+            console.print()
             return response_text
 
         except Exception as e:
-            print(f"\n{Colors.RED}❌ Processing error: {str(e)}{Colors.ENDC}")
+            console.print(Panel(f"❌ Processing error: {str(e)}", border_style="red"))
             return None
 
 
 if __name__ == "__main__":
     chat_session = DeepSeekChat()
-    print(f"\n{Colors.BOLD}🤖 DeepSeek Chat - Type 'exit' to quit{Colors.ENDC}")
-    print(
-        f"{Colors.BOLD}Commands: 'auto' to toggle auto-mode, 'reason' to toggle reasoning, 'exit' to quit\n{Colors.ENDC}"
+    title = Text()
+    title.append("🤖 DeepSeek Chat", style="bold")
+    title.append(" - Type 'exit' to quit\n", style="dim")
+    title.append("Commands: ", style="bold")
+    title.append(
+        "'auto' to toggle auto-mode, 'reason' to toggle reasoning, 'exit' to quit",
+        style="italic",
     )
+    console.print(Panel(title, border_style="blue"))
 
     try:
         while True:
-            user_input = input(f"{Colors.GREEN}👤 You: {Colors.ENDC}").strip()
+            user_input = console.input("[green]👤 You: [/green]").strip()
             if not user_input:
                 continue
 
@@ -325,4 +362,4 @@ if __name__ == "__main__":
             chat_session.chat(user_input)
 
     except KeyboardInterrupt:
-        print(f"\n\n{Colors.CYAN}👋 Session ended{Colors.ENDC}")
+        console.print(Panel("👋 Session ended", border_style="cyan"))
