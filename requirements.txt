@@ -1,2 +1,3 @@
 requests
 rich>=10.0.0
+flask
