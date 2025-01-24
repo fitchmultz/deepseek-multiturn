@@ -29,14 +29,14 @@ class DeepSeekChat:
             "Content-Type": "application/json",
         }
         self.messages: List[Dict] = []
-        self.auto_mode = False
+        self.auto_mode = True
         self.auto_iterations = 0
         self.max_auto_iterations = 3
-        self.show_reasoning = True  # New flag for reasoning visibility
+        self.show_reasoning = False
         self._auto_instruction = (
-            "Generate the next user message based on the conversation history. "
-            "Keep it natural and conversational. Respond ONLY with the user's message text "
-            "without any additional commentary or formatting."
+            "Generate the next USER message based on the conversation history. "
+            "Keep it natural and match the user's message style. Respond ONLY with "
+            "the user's message text WITHOUT any additional commentary or formatting."
         )
 
     def _validate_message_sequence(self, new_role: str) -> None:
