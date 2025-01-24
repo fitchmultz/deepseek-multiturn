@@ -12,7 +12,7 @@ class Colors:
     GREEN = "\033[92m"
     YELLOW = "\033[93m"
     RED = "\033[91m"
-    CYAN = "\033[96m"
+    CYAN = "\033\96m"
     ENDC = "\033[0m"
     BOLD = "\033[1m"
 
@@ -32,6 +32,7 @@ class DeepSeekChat:
         self.auto_mode = False
         self.auto_iterations = 0
         self.max_auto_iterations = 3
+        self.show_reasoning = True  # New flag for reasoning visibility
         self._auto_instruction = (
             "Generate the next user message based on the conversation history. "
             "Keep it natural and conversational. Respond ONLY with the user's message text "
@@ -103,6 +104,23 @@ class DeepSeekChat:
         except requests.exceptions.RequestException as e:
             raise RuntimeError(f"API Error: {str(e)}")
 
+    def toggle_auto_mode(self) -> None:
+        """Safely toggle auto-mode with state cleanup"""
+        self.auto_mode = not self.auto_mode
+        self.auto_iterations = 0
+        if self.auto_mode:
+            self._clean_auto_messages()
+        print(
+            f"\n{Colors.CYAN}🔄 Auto-mode {'enabled' if self.auto_mode else 'disabled'}{Colors.ENDC}"
+        )
+
+    def toggle_reasoning(self) -> None:
+        """Toggle visibility of assistant reasoning output"""
+        self.show_reasoning = not self.show_reasoning
+        print(
+            f"\n{Colors.CYAN}🔄 Assistant reasoning display {'enabled' if self.show_reasoning else 'disabled'}{Colors.ENDC}"
+        )
+
     def _generate_auto_response(self, verbose: bool = True) -> Optional[str]:
         """Generate auto-response with optional output suppression"""
         try:
@@ -127,7 +145,7 @@ class DeepSeekChat:
                 "stream": True,
             }
 
-            if verbose:
+            if self.show_reasoning:
                 print(
                     f"\n{Colors.CYAN}💭 Generating auto-response with full context:{Colors.ENDC}",
                     flush=True,
@@ -139,24 +157,22 @@ class DeepSeekChat:
 
             for type_, chunk in self._stream_request(payload):
                 if type_ == "reasoning":
-                    if verbose:
+                    if self.show_reasoning:
                         print(
                             f"{Colors.YELLOW}{chunk}{Colors.ENDC}", end="", flush=True
                         )
                 elif type_ == "content":
                     full_response.append(chunk)
-                    if verbose and not has_shown_content_header:
+                    if not has_shown_content_header:
                         print("\n" + "─" * 80)
                         print(
                             f"{Colors.GREEN}👤 Generated response:{Colors.ENDC}",
                             flush=True,
                         )
                         has_shown_content_header = True
-                    if verbose:
-                        print(f"{Colors.GREEN}{chunk}{Colors.ENDC}", end="", flush=True)
+                    print(f"{Colors.GREEN}{chunk}{Colors.ENDC}", end="", flush=True)
 
-            if verbose:
-                print("\n")
+            print("\n")
             return "".join(full_response).strip()
 
         except Exception as e:
@@ -165,16 +181,6 @@ class DeepSeekChat:
                     f"\n{Colors.RED}❌ Error generating auto-response: {str(e)}{Colors.ENDC}"
                 )
             return None
-
-    def toggle_auto_mode(self) -> None:
-        """Safely toggle auto-mode with state cleanup"""
-        self.auto_mode = not self.auto_mode
-        self.auto_iterations = 0
-        if self.auto_mode:
-            self._clean_auto_messages()
-        print(
-            f"\n{Colors.CYAN}🔄 Auto-mode {'enabled' if self.auto_mode else 'disabled'}{Colors.ENDC}"
-        )
 
     def chat(self, user_input: str) -> None:
         """Main chat method with iterative auto-response handling"""
@@ -234,15 +240,20 @@ class DeepSeekChat:
                 "stream": True,
             }
 
-            print(f"\n{Colors.YELLOW}💭 Reasoning:{Colors.ENDC}", flush=True)
-            print("─" * 80)
+            if self.show_reasoning:
+                print(f"\n{Colors.YELLOW}💭 Reasoning:{Colors.ENDC}", flush=True)
+                print("─" * 80)
+
             full_response = []
             full_reasoning = []
             has_shown_content_header = False
 
             for type_, chunk in self._stream_request(payload):
                 if type_ == "reasoning":
-                    print(f"{Colors.YELLOW}{chunk}{Colors.ENDC}", end="", flush=True)
+                    if self.show_reasoning:
+                        print(
+                            f"{Colors.YELLOW}{chunk}{Colors.ENDC}", end="", flush=True
+                        )
                     full_reasoning.append(chunk)
                 elif type_ == "content":
                     if not has_shown_content_header:
@@ -273,7 +284,7 @@ if __name__ == "__main__":
     chat_session = DeepSeekChat()
     print(f"{Colors.BOLD}🤖 DeepSeek Chat - Type 'exit' to quit{Colors.ENDC}")
     print(
-        f"{Colors.BOLD}Commands: 'auto' to toggle auto-mode, 'exit' to quit\n{Colors.ENDC}"
+        f"{Colors.BOLD}Commands: 'auto' to toggle auto-mode, 'reason' to toggle reasoning, 'exit' to quit\n{Colors.ENDC}"
     )
 
     try:
@@ -282,10 +293,13 @@ if __name__ == "__main__":
             if not user_input:
                 continue
 
-            if user_input.lower() == "exit":
+            if user_input.lower().strip() == "exit":
                 break
-            elif user_input.lower() == "auto":
+            elif user_input.lower().strip() == "auto":
                 chat_session.toggle_auto_mode()
+                continue
+            elif user_input.lower().strip() in ("reason", "reasoning"):
+                chat_session.toggle_reasoning()
                 continue
 
             chat_session.chat(user_input)
