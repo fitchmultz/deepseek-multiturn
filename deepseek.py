@@ -6,6 +6,17 @@ from typing import Dict, Generator, List, Optional
 import requests
 
 
+# ANSI color codes
+class Colors:
+    BLUE = "\033[94m"
+    GREEN = "\033[92m"
+    YELLOW = "\033[93m"
+    RED = "\033[91m"
+    CYAN = "\033[96m"
+    ENDC = "\033[0m"
+    BOLD = "\033[1m"
+
+
 class DeepSeekChat:
     def __init__(self):
         self.api_key = os.getenv("DEEPSEEK_API_KEY")
@@ -117,7 +128,10 @@ class DeepSeekChat:
             }
 
             if verbose:
-                print("\n💭 Generating auto-response with full context:", flush=True)
+                print(
+                    f"\n{Colors.CYAN}💭 Generating auto-response with full context:{Colors.ENDC}",
+                    flush=True,
+                )
                 print("─" * 80)
 
             full_response = []
@@ -126,15 +140,20 @@ class DeepSeekChat:
             for type_, chunk in self._stream_request(payload):
                 if type_ == "reasoning":
                     if verbose:
-                        print(chunk, end="", flush=True)
+                        print(
+                            f"{Colors.YELLOW}{chunk}{Colors.ENDC}", end="", flush=True
+                        )
                 elif type_ == "content":
                     full_response.append(chunk)
                     if verbose and not has_shown_content_header:
                         print("\n" + "─" * 80)
-                        print("👤 Generated response:", flush=True)
+                        print(
+                            f"{Colors.GREEN}👤 Generated response:{Colors.ENDC}",
+                            flush=True,
+                        )
                         has_shown_content_header = True
                     if verbose:
-                        print(chunk, end="", flush=True)
+                        print(f"{Colors.GREEN}{chunk}{Colors.ENDC}", end="", flush=True)
 
             if verbose:
                 print("\n")
@@ -142,7 +161,9 @@ class DeepSeekChat:
 
         except Exception as e:
             if verbose:
-                print(f"\n❌ Error generating auto-response: {str(e)}")
+                print(
+                    f"\n{Colors.RED}❌ Error generating auto-response: {str(e)}{Colors.ENDC}"
+                )
             return None
 
     def toggle_auto_mode(self) -> None:
@@ -151,7 +172,9 @@ class DeepSeekChat:
         self.auto_iterations = 0
         if self.auto_mode:
             self._clean_auto_messages()
-        print(f"\n🔄 Auto-mode {'enabled' if self.auto_mode else 'disabled'}")
+        print(
+            f"\n{Colors.CYAN}🔄 Auto-mode {'enabled' if self.auto_mode else 'disabled'}{Colors.ENDC}"
+        )
 
     def chat(self, user_input: str) -> None:
         """Main chat method with iterative auto-response handling"""
@@ -175,14 +198,14 @@ class DeepSeekChat:
             ):
                 self.auto_iterations += 1  # Increment before processing
                 print(
-                    f"\n🔁 Auto-iteration: {self.auto_iterations}/{self.max_auto_iterations}"
+                    f"\n{Colors.CYAN}🔁 Auto-iteration: {self.auto_iterations}/{self.max_auto_iterations}{Colors.ENDC}"
                 )
 
-                auto_response = self._generate_auto_response(verbose=False)
+                auto_response = self._generate_auto_response(verbose=True)
                 if not auto_response:
                     break
 
-                print(f"\n👤 Auto-user: {auto_response}")
+                print(f"\n{Colors.GREEN}👤 Auto-user: {auto_response}{Colors.ENDC}")
                 self.messages.append(
                     {
                         "role": "user",
@@ -199,7 +222,7 @@ class DeepSeekChat:
         except Exception as e:
             if self.messages and self.messages[-1]["role"] == "user":
                 self.messages.pop()
-            print(f"\n❌ Error: {str(e)}")
+            print(f"\n{Colors.RED}❌ Error: {str(e)}{Colors.ENDC}")
 
     def _process_chat_round(self) -> Optional[str]:
         """Handle a single round of chat interaction"""
@@ -211,7 +234,7 @@ class DeepSeekChat:
                 "stream": True,
             }
 
-            print("\n💭 Reasoning:", flush=True)
+            print(f"\n{Colors.YELLOW}💭 Reasoning:{Colors.ENDC}", flush=True)
             print("─" * 80)
             full_response = []
             full_reasoning = []
@@ -219,14 +242,14 @@ class DeepSeekChat:
 
             for type_, chunk in self._stream_request(payload):
                 if type_ == "reasoning":
-                    print(chunk, end="", flush=True)
+                    print(f"{Colors.YELLOW}{chunk}{Colors.ENDC}", end="", flush=True)
                     full_reasoning.append(chunk)
                 elif type_ == "content":
                     if not has_shown_content_header:
                         print("\n" + "─" * 80)
-                        print("🤖 Response:", flush=True)
+                        print(f"{Colors.BLUE}🤖 Response:{Colors.ENDC}", flush=True)
                         has_shown_content_header = True
-                    print(chunk, end="", flush=True)
+                    print(f"{Colors.BLUE}{chunk}{Colors.ENDC}", end="", flush=True)
                     full_response.append(chunk)
 
             response_text = "".join(full_response)
@@ -242,18 +265,20 @@ class DeepSeekChat:
             return response_text
 
         except Exception as e:
-            print(f"\n❌ Processing error: {str(e)}")
+            print(f"\n{Colors.RED}❌ Processing error: {str(e)}{Colors.ENDC}")
             return None
 
 
 if __name__ == "__main__":
     chat_session = DeepSeekChat()
-    print("🤖 DeepSeek Chat - Type 'exit' to quit")
-    print("Commands: 'auto' to toggle auto-mode, 'exit' to quit\n")
+    print(f"{Colors.BOLD}🤖 DeepSeek Chat - Type 'exit' to quit{Colors.ENDC}")
+    print(
+        f"{Colors.BOLD}Commands: 'auto' to toggle auto-mode, 'exit' to quit\n{Colors.ENDC}"
+    )
 
     try:
         while True:
-            user_input = input("👤 You: ").strip()
+            user_input = input(f"{Colors.GREEN}👤 You: {Colors.ENDC}").strip()
             if not user_input:
                 continue
 
@@ -266,4 +291,4 @@ if __name__ == "__main__":
             chat_session.chat(user_input)
 
     except KeyboardInterrupt:
-        print("\n\n👋 Session ended")
+        print(f"\n\n{Colors.CYAN}👋 Session ended{Colors.ENDC}")
