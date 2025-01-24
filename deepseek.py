@@ -32,6 +32,7 @@ class DeepSeekChat:
         self.auto_mode = True
         self.auto_iterations = 0
         self.max_auto_iterations = 3
+        self.max_auto_retries = 2  # New: Maximum retries for auto-mode errors
         self.show_reasoning = False
         self._auto_instruction = (
             "Generate the next USER message based on the conversation history. "
@@ -184,39 +185,65 @@ class DeepSeekChat:
                 {"role": "user", "content": user_input, "is_auto_generated": False}
             )
 
+            # Reset auto-iteration counter for new user input
+            self.auto_iterations = 0
+
             # Generate initial response
             response_text = self._process_chat_round()
             if not response_text:
                 return
 
-            # Handle auto-responses iteratively with loop control
+            # Handle auto-responses iteratively with loop control and error handling
+            retry_count = 0
             while (
                 self.auto_mode
                 and self.auto_iterations < self.max_auto_iterations
                 and response_text is not None
             ):
-                auto_response = self._generate_auto_response()
-                if not auto_response:
-                    break
+                try:
+                    auto_response = self._generate_auto_response()
+                    if not auto_response:
+                        print(
+                            f"\n{Colors.YELLOW}⚠️ Auto-response generation failed, stopping auto-mode{Colors.ENDC}"
+                        )
+                        break
 
-                self.auto_iterations += 1  # Increment after successful auto-response
-                print(
-                    f"{Colors.CYAN}🔄 Auto-iteration: {self.auto_iterations}/{self.max_auto_iterations}{Colors.ENDC}"
-                )
+                    self.auto_iterations += 1
+                    print(
+                        f"{Colors.CYAN}🔄 Auto-iteration: {self.auto_iterations}/{self.max_auto_iterations}{Colors.ENDC}"
+                    )
 
-                print(f"\n{Colors.GREEN}👤 Auto-user: {auto_response}{Colors.ENDC}")
-                self.messages.append(
-                    {
-                        "role": "user",
-                        "content": auto_response,
-                        "is_auto_generated": True,
-                    }
-                )
+                    print(f"\n{Colors.GREEN}👤 Auto-user: {auto_response}{Colors.ENDC}")
+                    self.messages.append(
+                        {
+                            "role": "user",
+                            "content": auto_response,
+                            "is_auto_generated": True,
+                        }
+                    )
 
-                # Process assistant response
-                response_text = self._process_chat_round()
-                if not response_text:
-                    break
+                    # Process assistant response
+                    response_text = self._process_chat_round()
+                    if not response_text:
+                        print(
+                            f"\n{Colors.YELLOW}⚠️ Assistant response failed, stopping auto-mode{Colors.ENDC}"
+                        )
+                        break
+
+                    # Reset retry count on successful iteration
+                    retry_count = 0
+
+                except Exception as e:
+                    retry_count += 1
+                    if retry_count > self.max_auto_retries:
+                        print(
+                            f"\n{Colors.RED}❌ Max retries ({self.max_auto_retries}) exceeded in auto-mode, stopping{Colors.ENDC}"
+                        )
+                        break
+                    print(
+                        f"\n{Colors.YELLOW}⚠️ Auto-mode error (attempt {retry_count}/{self.max_auto_retries}): {str(e)}{Colors.ENDC}"
+                    )
+                    continue
 
         except Exception as e:
             if self.messages and self.messages[-1]["role"] == "user":
