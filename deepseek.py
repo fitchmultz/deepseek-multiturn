@@ -285,7 +285,7 @@ class DeepSeekChat:
             console.print(Panel(f"❌ Error: {str(e)}", border_style="red"))
 
     def _process_chat_round(self) -> Optional[str]:
-        """Handle a single round of chat interaction"""
+        """Handle a single round of chat interaction with markdown rendering"""
         try:
             self._validate_message_sequence("assistant")
             payload = {
@@ -300,7 +300,7 @@ class DeepSeekChat:
 
             full_response = []
             full_reasoning = []
-            has_shown_content_header = False
+            content_received = False  # Track if we received any content
 
             for type_, chunk in self._stream_request(payload):
                 if type_ == "reasoning":
@@ -308,12 +308,14 @@ class DeepSeekChat:
                         console.print(chunk, style="yellow", end="")
                     full_reasoning.append(chunk)
                 elif type_ == "content":
-                    if not has_shown_content_header:
-                        console.print("\n" + "─" * 80 + "\n")
-                        console.print(Panel("🤖 Response:", border_style="blue"))
-                        has_shown_content_header = True
-                    console.print(chunk, style="blue", end="")
                     full_response.append(chunk)
+                    content_received = True
+
+            # Render markdown after collecting all content
+            if content_received:
+                console.print("\n" + "─" * 80 + "\n")
+                console.print(Panel("🤖 Response:", border_style="blue"))
+                console.print(Markdown("".join(full_response)))
 
             response_text = "".join(full_response)
             if response_text:
@@ -324,7 +326,7 @@ class DeepSeekChat:
                         "is_auto_generated": False,
                     }
                 )
-            console.print()
+
             return response_text
 
         except Exception as e:
