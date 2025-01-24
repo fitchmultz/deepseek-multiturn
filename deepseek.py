@@ -13,18 +13,17 @@ from rich.text import Text
 console = Console()
 
 
-# ANSI color codes
-class Colors:
-    BLUE = "\033[94m"
-    GREEN = "\033[92m"
-    YELLOW = "\033[93m"
-    RED = "\033[91m"
-    CYAN = "\033[96m"
-    ENDC = "\033[0m"
-    BOLD = "\033[1m"
-
-
 class DeepSeekChat:
+    PANEL_STYLES = {
+        "user": {"title": "👤 You", "border_style": "green", "style": "green"},
+        "assistant": {"title": "🤖 Assistant", "border_style": "blue", "style": "blue"},
+        "reasoning": {
+            "title": "💭 Reasoning",
+            "border_style": "yellow",
+            "style": "yellow",
+        },
+    }
+
     def __init__(self):
         self.api_key = os.getenv("DEEPSEEK_API_KEY")
         if not self.api_key:
@@ -43,8 +42,10 @@ class DeepSeekChat:
         self.show_reasoning = False
         self._auto_instruction = (
             "Generate the next USER message based on the conversation history. "
-            "Keep it natural and match the user's message style. Respond ONLY with "
-            "the user's message text WITHOUT any additional commentary or formatting."
+            "Keep it natural and match the user's message style. Be as LENGTHY as "
+            "you desire. Being CONCISE is fine too! Respond ONLY with "
+            "the user's message text WITHOUT any additional commentary. You can "
+            "add markdown formatting if you want, but it's not required."
         )
 
     def _validate_message_sequence(self, new_role: str) -> None:
@@ -139,7 +140,7 @@ class DeepSeekChat:
             raise RuntimeError(f"API Error: {str(e)}")
 
     def _generate_auto_response(self) -> Optional[str]:
-        """Generate auto-response with optional output suppression"""
+        """Generate auto-response with streaming markdown rendering"""
         try:
             self._validate_message_sequence("user")
             conversation_history = [
@@ -172,20 +173,48 @@ class DeepSeekChat:
                 console.print("─" * 80)
 
             full_response = []
-            has_shown_content_header = False
+            content_buffer = []
+            has_shown_content = False
 
-            for type_, chunk in self._stream_request(payload):
-                if type_ == "reasoning":
-                    if self.show_reasoning:
-                        console.print(chunk, style="yellow", end="")
-                elif type_ == "content":
-                    full_response.append(chunk)
-                    if not has_shown_content_header:
-                        console.print("\n" + "─" * 80)
-                        has_shown_content_header = True
+            self.suppress_auto_display = True
 
+            with Live(
+                console=console, refresh_per_second=4, vertical_overflow="visible"
+            ) as live:
+                for type_, chunk in self._stream_request(payload):
+                    if type_ == "reasoning":
+                        if self.show_reasoning:
+                            console.print(
+                                chunk,
+                                style=self.PANEL_STYLES["reasoning"]["style"],
+                                end="",
+                            )
+                    elif type_ == "content":
+                        if not has_shown_content:
+                            # Remove explicit header prints
+                            has_shown_content = True
+
+                        content_buffer.append(chunk)
+                        full_response.append(chunk)
+
+                        # Update with combined panel
+                        panel = Panel(
+                            Markdown("".join(content_buffer)),
+                            **{**self.PANEL_STYLES["user"], "title": "👤 Auto-User"},
+                        )
+                        live.update(panel)
+
+                # Final update with complete panel
+                if has_shown_content:
+                    live.update(
+                        Panel(
+                            Markdown("".join(content_buffer)),
+                            **{**self.PANEL_STYLES["user"], "title": "👤 Auto-User"},
+                        )
+                    )
+
+            self.suppress_auto_display = False
             return "".join(full_response).strip()
-
         except Exception as e:
             console.print(
                 Panel(
@@ -202,6 +231,9 @@ class DeepSeekChat:
             self.messages.append(
                 {"role": "user", "content": user_input, "is_auto_generated": False}
             )
+
+            # Display user input as markdown
+            console.print(Panel(Markdown(user_input), **self.PANEL_STYLES["user"]))
 
             # Reset auto-iteration counter for new user input
             self.auto_iterations = 0
@@ -235,10 +267,6 @@ class DeepSeekChat:
                             f"🔄 Auto-iteration: {self.auto_iterations}/{self.max_auto_iterations}",
                             border_style="cyan",
                         )
-                    )
-
-                    console.print(
-                        Panel(Text(f"👤 Auto-user: {auto_response}", style="green"))
                     )
                     self.messages.append(
                         {
@@ -300,11 +328,9 @@ class DeepSeekChat:
                 console.print("─" * 80)
 
             full_response = []
-            full_reasoning = []
             content_buffer = []
             has_content = False
 
-            # Initialize Live once at the start
             with Live(
                 console=console, refresh_per_second=4, vertical_overflow="visible"
             ) as live:
@@ -312,23 +338,29 @@ class DeepSeekChat:
                     if type_ == "reasoning":
                         if self.show_reasoning:
                             console.print(chunk, style="yellow", end="")
-                        full_reasoning.append(chunk)
                     elif type_ == "content":
-                        if not has_content:
-                            # Only print headers once
-                            console.print("\n" + "─" * 80 + "\n")
-                            console.print(Panel("🤖 Response:", border_style="blue"))
-                            has_content = True
-
                         content_buffer.append(chunk)
                         full_response.append(chunk)
 
-                        # Update live display with current markdown
-                        live.update(Markdown("".join(content_buffer)))
+                        # Create panel with current content
+                        panel = Panel(
+                            Markdown("".join(content_buffer)),
+                            title="🤖 Assistant",
+                            border_style="blue",
+                            style="blue",
+                        )
+                        live.update(panel)
 
-                # Final update to ensure complete rendering
-                if has_content:
-                    live.update(Markdown("".join(content_buffer)))
+                # Final update with complete panel
+                if content_buffer:
+                    live.update(
+                        Panel(
+                            Markdown("".join(content_buffer)),
+                            title="🤖 Assistant",
+                            border_style="blue",
+                            style="blue",
+                        )
+                    )
 
             response_text = "".join(full_response)
             if response_text:
